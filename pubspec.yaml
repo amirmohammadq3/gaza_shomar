@@ -1,0 +1,31 @@
+name: qaza_shomar
+description: "قضاشمار - مدیریت نماز و روزه قضا"
+publish_to: 'none'
+version: 1.1.0+2
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.3.2
+  vibration: ^3.1.3
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.png
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/logo.png"
