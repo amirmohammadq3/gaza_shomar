@@ -528,7 +528,7 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
 
   Widget _buildHeader(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topRight,
@@ -536,42 +536,36 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
           colors: [Color(0xFF3E64FF), Color(0xFF5EA1FF)],
         ),
       ),
-      child: SizedBox(
-        width: double.infinity,
-        height: 48,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            const Column(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          GestureDetector(
+            onTap: () {
+              appState.vibrate();
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryScreen()));
+            },
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.18)),
+              child: const Icon(Icons.history, color: Colors.white, size: 22),
+            ),
+          ),
+          Expanded(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text('قضاشمار', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
-                SizedBox(height: 2),
-                Text('مدیریت نماز و روزه قضا', style: TextStyle(color: Colors.white70, fontSize: 11.5)),
+                const Text('قضاشمار',
+                    textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 2),
+                Text('مدیریت نماز و روزه قضا',
+                    textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 11.5)),
               ],
             ),
-            Positioned(
-              right: 0,
-              child: GestureDetector(
-                onTap: () {
-                  appState.vibrate();
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryScreen()));
-                },
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.18)),
-                  child: const Icon(Icons.history, color: Colors.white, size: 22),
-                ),
-              ),
-            ),
-            Positioned(
-              left: -6,
-              child: _buildNotifToggle(context),
-            ),
-          ],
-        ),
+          ),
+          _buildNotifToggle(context),
+        ],
       ),
     );
   }
@@ -601,16 +595,16 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
     return GestureDetector(
       onTap: () => _toggleNotifications(context, !on),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.28),
+          color: Colors.white.withOpacity(0.38),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Row(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text('اعلان‌ها', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-            const SizedBox(width: 4),
+            const SizedBox(height: 3),
             SizedBox(
               width: 41,
               height: 24,
