@@ -517,32 +517,42 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
           colors: [Color(0xFF3E64FF), Color(0xFF5EA1FF)],
         ),
       ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () {
-              appState.vibrate();
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryScreen()));
-            },
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.18)),
-              child: const Icon(Icons.history, color: Colors.white, size: 22),
+      child: SizedBox(
+        width: double.infinity,
+        height: 48,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            const Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text('قضاشمار', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
+                SizedBox(height: 2),
+                Text('مدیریت نماز و روزه قضا', style: TextStyle(color: Colors.white70, fontSize: 11.5)),
+              ],
             ),
-          ),
-          const Spacer(),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text('قضاشمار', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
-              SizedBox(height: 2),
-              Text('مدیریت نماز و روزه قضا', style: TextStyle(color: Colors.white70, fontSize: 11.5)),
-            ],
-          ),
-          const Spacer(),
-          _buildNotifToggle(context),
-        ],
+            Positioned(
+              right: 0,
+              child: GestureDetector(
+                onTap: () {
+                  appState.vibrate();
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryScreen()));
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.18)),
+                  child: const Icon(Icons.history, color: Colors.white, size: 22),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              child: _buildNotifToggle(context),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -569,22 +579,25 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
     return GestureDetector(
       onTap: () => _toggleNotifications(context, !on),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 3))],
+          color: Colors.white.withOpacity(0.18),
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('اعلان‌ها', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2B2F42))),
-            const SizedBox(width: 4),
+            const Text('اعلان‌ها', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(width: 2),
             Transform.scale(
-              scale: 0.7,
+              scale: 0.6,
               child: Switch(
                 value: on,
-                activeColor: const Color(0xFF3E64FF),
+                activeColor: Colors.white,
+                activeTrackColor: const Color(0xFF1B2A66),
+                inactiveThumbColor: Colors.white70,
+                inactiveTrackColor: Colors.white24,
                 onChanged: (v) => _toggleNotifications(context, v),
               ),
             ),
@@ -767,7 +780,7 @@ class _CategoryCardState extends State<CategoryCard> with AppStateListenerMixin 
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Text('فضای شکسته', style: TextStyle(fontSize: 9, color: Color(0xFF8A8FA3))),
+                                const Text('قضای شکسته', style: TextStyle(fontSize: 9, color: Color(0xFF8A8FA3))),
                                 Text(
                                   toFarsiDigits(brokenCount),
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2B2F42)),
