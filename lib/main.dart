@@ -319,21 +319,28 @@ class PrayerNotify {
 
   /// اجازه‌ی نمایش اعلان (اندروید ۱۳ به بعد)، اجازه‌ی زمان‌بندی دقیق،
   /// و بعد از هر دو، اجازه‌ی روشن‌ماندن در پس‌زمینه (نادیده‌گرفتن بهینه‌سازی باتری).
-  /// بین هر درخواست یه مکث کوتاه می‌ذاریم تا اندروید فرصت کنه دیالوگ/صفحه‌ی
-  /// قبلی رو کامل نشون بده و بعدی رو با تأخیر صادر کنه (وگرنه بعضی گوشی‌ها
-  /// درخواست‌های پشت‌سرهم رو قاطی می‌کنن و یکی‌شون اصلاً نمایش داده نمی‌شه).
+  /// اگه اجازه‌ی اعلان قبلاً (توی یکی از تست‌های قبلی) برای همیشه رد شده باشه،
+  /// اندروید دیگه هیچ‌وقت دیالوگش رو نشون نمی‌ده؛ توی این حالت کاربر رو مستقیم
+  /// می‌بریم به صفحه‌ی تنظیمات خودِ اپ تا دستی روشنش کنه.
   static Future<bool> requestPermissions() async {
     await _ensureInit();
     final androidImpl = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
+    final notifStatus = await Permission.notification.status;
+    if (notifStatus.isPermanentlyDenied) {
+      await openAppSettings();
+      return false;
+    }
+
     bool granted = true;
     try {
       granted = await androidImpl?.requestNotificationsPermission() ?? true;
     } catch (_) {}
-    await Future.delayed(const Duration(seconds: 8));
+    await Future.delayed(const Duration(seconds: 1));
     try {
       await androidImpl?.requestExactAlarmsPermission();
     } catch (_) {}
-    await Future.delayed(const Duration(seconds: 8));
+    await Future.delayed(const Duration(seconds: 1));
     try {
       await Permission.ignoreBatteryOptimizations.request();
     } catch (_) {}
@@ -577,7 +584,10 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
       await PrayerNotify.rescheduleAll();
       if (!granted && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('اجازه‌ی نمایش اعلان از تنظیمات گوشی داده نشد؛ برای دریافت یادآوری‌ها آن را از تنظیمات فعال کنید.')),
+          const SnackBar(
+            content: Text('اجازه‌ی نمایش اعلان قبلاً رد شده. شما را به تنظیمات اپ بردیم؛ از آنجا «اعلان‌ها» را روشن کنید و برگردید.'),
+            duration: Duration(seconds: 5),
+          ),
         );
       }
     } else {
