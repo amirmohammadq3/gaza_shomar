@@ -585,29 +585,30 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
     final on = appState.notificationsOn;
     return GestureDetector(
       onTap: () => _toggleNotifications(context, !on),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 100),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.28),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('اعلان‌ها', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-              const SizedBox(width: 2),
-              Transform.scale(
-                scale: 0.7,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.28),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('اعلان‌ها', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 34,
+              height: 20,
+              child: FittedBox(
+                fit: BoxFit.fill,
                 child: Switch(
                   value: on,
                   activeColor: const Color(0xFF3E64FF),
                   onChanged: (v) => _toggleNotifications(context, v),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
