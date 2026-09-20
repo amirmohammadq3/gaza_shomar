@@ -329,11 +329,11 @@ class PrayerNotify {
     try {
       granted = await androidImpl?.requestNotificationsPermission() ?? true;
     } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 700));
+    await Future.delayed(const Duration(seconds: 8));
     try {
       await androidImpl?.requestExactAlarmsPermission();
     } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 700));
+    await Future.delayed(const Duration(seconds: 8));
     try {
       await Permission.ignoreBatteryOptimizations.request();
     } catch (_) {}
