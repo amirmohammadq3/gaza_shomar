@@ -578,30 +578,33 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
     final on = appState.notificationsOn;
     return GestureDetector(
       onTap: () => _toggleNotifications(context, !on),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.18),
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('اعلان‌ها', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-            const SizedBox(width: 4),
-            SizedBox(
-              height: 24,
-              child: Switch(
-                value: on,
-                activeColor: Colors.white,
-                activeTrackColor: const Color(0xFF1B2A66),
-                inactiveThumbColor: Colors.white70,
-                inactiveTrackColor: Colors.white24,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                onChanged: (v) => _toggleNotifications(context, v),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 108),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.18),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('اعلان‌ها', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(width: 2),
+              Transform.scale(
+                scale: 0.85,
+                child: Switch(
+                  value: on,
+                  activeColor: Colors.white,
+                  activeTrackColor: const Color(0xFF1B2A66),
+                  inactiveThumbColor: Colors.white70,
+                  inactiveTrackColor: Colors.white24,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (v) => _toggleNotifications(context, v),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
