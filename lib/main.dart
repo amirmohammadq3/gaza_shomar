@@ -367,8 +367,10 @@ class PrayerNotify {
     if (!scheduled.isAfter(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
-    final plainBody = '${_emoji[catId]} شما ${toFarsiDigits(count)} نماز قضای ${_label[catId]} دارید.\n${_tail[catId]}';
-    final htmlBody = '<b>$plainBody</b>'.replaceAll('\n', '<br>');
+    final countFa = toFarsiDigits(count);
+    final plainBody = '${_emoji[catId]} شما $countFa نماز قضای ${_label[catId]} دارید.\n${_tail[catId]}';
+    final htmlBody =
+        '<b>${_emoji[catId]} شما <font color="#FFCC33">$countFa</font> نماز قضای ${_label[catId]} دارید.<br>${_tail[catId]}</b>';
     await _plugin.zonedSchedule(
       id,
       'قضاشمار',
@@ -579,27 +581,23 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
     return GestureDetector(
       onTap: () => _toggleNotifications(context, !on),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 108),
+        constraints: const BoxConstraints(maxWidth: 130),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.18),
-            borderRadius: BorderRadius.circular(20),
+            color: Colors.white.withOpacity(0.28),
+            borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('اعلان‌ها', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
-              const SizedBox(width: 2),
+              const Text('اعلان‌ها', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(width: 4),
               Transform.scale(
-                scale: 0.85,
+                scale: 0.7,
                 child: Switch(
                   value: on,
-                  activeColor: Colors.white,
-                  activeTrackColor: const Color(0xFF1B2A66),
-                  inactiveThumbColor: Colors.white70,
-                  inactiveTrackColor: Colors.white24,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  activeColor: const Color(0xFF3E64FF),
                   onChanged: (v) => _toggleNotifications(context, v),
                 ),
               ),
