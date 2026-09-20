@@ -318,7 +318,10 @@ class PrayerNotify {
   }
 
   /// اجازه‌ی نمایش اعلان (اندروید ۱۳ به بعد)، اجازه‌ی زمان‌بندی دقیق،
-  /// و بعد از هر دو، اجازه‌ی روشن‌ماندن در پس‌زمینه (نادیده‌گرفتن بهینه‌سازی باتری)
+  /// و بعد از هر دو، اجازه‌ی روشن‌ماندن در پس‌زمینه (نادیده‌گرفتن بهینه‌سازی باتری).
+  /// بین هر درخواست یه مکث کوتاه می‌ذاریم تا اندروید فرصت کنه دیالوگ/صفحه‌ی
+  /// قبلی رو کامل نشون بده و بعدی رو با تأخیر صادر کنه (وگرنه بعضی گوشی‌ها
+  /// درخواست‌های پشت‌سرهم رو قاطی می‌کنن و یکی‌شون اصلاً نمایش داده نمی‌شه).
   static Future<bool> requestPermissions() async {
     await _ensureInit();
     final androidImpl = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
@@ -326,9 +329,11 @@ class PrayerNotify {
     try {
       granted = await androidImpl?.requestNotificationsPermission() ?? true;
     } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 700));
     try {
       await androidImpl?.requestExactAlarmsPermission();
     } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 700));
     try {
       await Permission.ignoreBatteryOptimizations.request();
     } catch (_) {}
@@ -555,7 +560,7 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
               ),
             ),
             Positioned(
-              left: 0,
+              left: -6,
               child: _buildNotifToggle(context),
             ),
           ],
@@ -586,7 +591,7 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
     return GestureDetector(
       onTap: () => _toggleNotifications(context, !on),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.28),
           borderRadius: BorderRadius.circular(14),
@@ -594,13 +599,13 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('اعلان‌ها', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+            const Text('اعلان‌ها', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(width: 4),
             SizedBox(
-              width: 34,
-              height: 20,
+              width: 41,
+              height: 24,
               child: FittedBox(
-                fit: BoxFit.fill,
+                fit: BoxFit.contain,
                 child: Switch(
                   value: on,
                   activeColor: const Color(0xFF3E64FF),
