@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -316,7 +317,8 @@ class PrayerNotify {
     _initialized = true;
   }
 
-  /// اجازه‌ی نمایش اعلان (اندروید ۱۳ به بعد) و اجازه‌ی زمان‌بندی دقیق رو می‌گیره
+  /// اجازه‌ی نمایش اعلان (اندروید ۱۳ به بعد)، اجازه‌ی زمان‌بندی دقیق،
+  /// و بعد از هر دو، اجازه‌ی روشن‌ماندن در پس‌زمینه (نادیده‌گرفتن بهینه‌سازی باتری)
   static Future<bool> requestPermissions() async {
     await _ensureInit();
     final androidImpl = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
@@ -326,6 +328,9 @@ class PrayerNotify {
     } catch (_) {}
     try {
       await androidImpl?.requestExactAlarmsPermission();
+    } catch (_) {}
+    try {
+      await Permission.ignoreBatteryOptimizations.request();
     } catch (_) {}
     return granted;
   }
@@ -581,9 +586,9 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
     return GestureDetector(
       onTap: () => _toggleNotifications(context, !on),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 130),
+        constraints: const BoxConstraints(maxWidth: 100),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           decoration: BoxDecoration(
             color: Colors.white.withOpacity(0.28),
             borderRadius: BorderRadius.circular(14),
@@ -592,7 +597,7 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('اعلان‌ها', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-              const SizedBox(width: 4),
+              const SizedBox(width: 2),
               Transform.scale(
                 scale: 0.7,
                 child: Switch(
