@@ -1,4 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:archive/archive.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -101,6 +105,11 @@ const List<QazaCategory> kCategories = [
 /// شناسه‌ی نمازهای پنج‌گانه (برای بخش «کامل/شکسته» و اعلان‌ها)
 const Set<String> kFardIds = {'sobh', 'zohr', 'asr', 'maghrib', 'isha'};
 
+/// فقط نمازهای چهار رکعتی (ظهر، عصر، عشا) شکسته دارند؛ صبح و مغرب شکسته ندارند
+const Set<String> kQasrIds = {'zohr', 'asr', 'isha'};
+
+const String kAppVersion = '2.0.0';
+
 /// -------------------- یک رکورد تاریخچه --------------------
 class HistoryEntry {
   final String categoryId;
@@ -144,6 +153,9 @@ class AppState extends ChangeNotifier {
   bool loaded = false;
   bool vibrationOn = true;
   bool notificationsOn = false;
+  bool weeklyBackupOn = false;
+  DateTime? lastBackupTime; // آخرین پشتیبان‌گیری (دستی یا هفتگی)
+  DateTime? lastWeeklyTime; // آخرین پشتیبان‌گیری خودکار هفتگی
 
   int currentOf(String id) => (totalAdded[id] ?? 0) - (totalRemoved[id] ?? 0);
   int currentBrokenOf(String id) {
@@ -168,6 +180,11 @@ class AppState extends ChangeNotifier {
     }
     vibrationOn = prefs.getBool('vibration') ?? true;
     notificationsOn = prefs.getBool('notifications') ?? false;
+    weeklyBackupOn = prefs.getBool('weekly_backup') ?? false;
+    final lb = prefs.getInt('last_backup_ms');
+    lastBackupTime = lb == null ? null : DateTime.fromMillisecondsSinceEpoch(lb);
+    final lw = prefs.getInt('last_weekly_ms');
+    lastWeeklyTime = lw == null ? null : DateTime.fromMillisecondsSinceEpoch(lw);
     final histRaw = prefs.getString('history');
     if (histRaw != null) {
       try {
@@ -242,6 +259,45 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('notifications', v);
+  }
+
+  Future<void> setWeeklyBackup(bool v) async {
+    weeklyBackupOn = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('weekly_backup', v);
+  }
+
+  Future<void> markBackupDone({required bool weekly}) async {
+    final now = DateTime.now();
+    lastBackupTime = now;
+    if (weekly) lastWeeklyTime = now;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('last_backup_ms', now.millisecondsSinceEpoch);
+    if (weekly) await prefs.setInt('last_weekly_ms', now.millisecondsSinceEpoch);
+  }
+
+  /// جایگزینی کامل اطلاعات برنامه با اطلاعات یک فایل پشتیبان
+  Future<void> restoreFromBackup(BackupData d) async {
+    final prefs = await SharedPreferences.getInstance();
+    for (final cat in kCategories) {
+      totalAdded[cat.id] = d.added[cat.id] ?? 0;
+      totalRemoved[cat.id] = d.removed[cat.id] ?? 0;
+      totalAddedBroken[cat.id] = d.addedBroken[cat.id] ?? 0;
+      totalRemovedBroken[cat.id] = d.removedBroken[cat.id] ?? 0;
+      await _persistTotals(cat.id);
+    }
+    history
+      ..clear()
+      ..addAll(d.history);
+    await _persistHistory();
+    notifyListeners();
+    if (notificationsOn) {
+      await PrayerNotify.rescheduleAll();
+    }
+    // (prefs برای اطمینان از ثبت نهایی)
+    await prefs.reload();
   }
 
   Future<void> vibrate() async {
@@ -425,7 +481,7 @@ class _QazaShomarAppState extends State<QazaShomarApp> {
   @override
   void initState() {
     super.initState();
-    appState.load();
+    appState.load().then((_) => BackupService.onLaunch());
   }
 
   @override
@@ -528,7 +584,7 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
 
   Widget _buildHeader(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topRight,
@@ -537,7 +593,6 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
         ),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           GestureDetector(
             onTap: () {
@@ -551,74 +606,29 @@ class _HomeScreenState extends State<HomeScreen> with AppStateListenerMixin, Sin
               child: const Icon(Icons.history, color: Colors.white, size: 22),
             ),
           ),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                const Text('قضاشمار',
-                    textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 2),
-                Text('مدیریت نماز و روزه قضا',
-                    textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 11.5)),
-              ],
+          const Spacer(),
+          const Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text('قضاشمار', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
+              SizedBox(height: 2),
+              Text('مدیریت نماز و روزه قضا', style: TextStyle(color: Colors.white70, fontSize: 11.5)),
+            ],
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () {
+              appState.vibrate();
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+            },
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.18)),
+              child: const Icon(Icons.settings, color: Colors.white, size: 22),
             ),
           ),
-          _buildNotifToggle(context),
         ],
-      ),
-    );
-  }
-
-  Future<void> _toggleNotifications(BuildContext context, bool value) async {
-    appState.vibrate();
-    if (value) {
-      final granted = await PrayerNotify.requestPermissions();
-      await appState.setNotifications(true);
-      await PrayerNotify.rescheduleAll();
-      if (!granted && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('اجازه‌ی نمایش اعلان قبلاً رد شده. شما را به تنظیمات اپ بردیم؛ از آنجا «اعلان‌ها» را روشن کنید و برگردید.'),
-            duration: Duration(seconds: 5),
-          ),
-        );
-      }
-    } else {
-      await appState.setNotifications(false);
-      await PrayerNotify.cancelAll();
-    }
-  }
-
-  Widget _buildNotifToggle(BuildContext context) {
-    final on = appState.notificationsOn;
-    return GestureDetector(
-      onTap: () => _toggleNotifications(context, !on),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.38),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('اعلان‌ها', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-            const SizedBox(height: 3),
-            SizedBox(
-              width: 41,
-              height: 24,
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: Switch(
-                  value: on,
-                  activeColor: const Color(0xFF3E64FF),
-                  onChanged: (v) => _toggleNotifications(context, v),
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -726,7 +736,7 @@ class _CategoryCardState extends State<CategoryCard> with AppStateListenerMixin 
   Future<({int amount, bool isBroken})?> _showAmountDialog({required bool isAdd}) async {
     final controller = TextEditingController(text: '1');
     final cat = widget.category;
-    final showToggle = kFardIds.contains(cat.id);
+    final showToggle = kQasrIds.contains(cat.id);
     bool isBroken = false;
     return showDialog<({int amount, bool isBroken})>(
       context: context,
@@ -1070,6 +1080,963 @@ class _HistoryScreenState extends State<HistoryScreen> with AppStateListenerMixi
                         );
                       },
                     ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// ==================== پشتیبان‌گیری (بک‌آپ) ====================
+
+/// نگاشت شناسه‌ی داخلی نمازها به کلیدهای فایل پشتیبان
+const Map<String, String> kBackupPrayerKeys = {
+  'sobh': 'fajr',
+  'zohr': 'dhuhr',
+  'asr': 'asr',
+  'maghrib': 'maghrib',
+  'isha': 'isha',
+  'ayat': 'ayat',
+};
+
+const Map<String, String> kBackupPrayerFa = {
+  'sobh': 'نماز صبح',
+  'zohr': 'نماز ظهر',
+  'asr': 'نماز عصر',
+  'maghrib': 'نماز مغرب',
+  'isha': 'نماز عشا',
+  'ayat': 'نماز آیات',
+};
+
+/// اطلاعاتی که از یک فایل پشتیبان خوانده می‌شود
+class BackupData {
+  final Map<String, int> added;
+  final Map<String, int> removed;
+  final Map<String, int> addedBroken;
+  final Map<String, int> removedBroken;
+  final List<HistoryEntry> history;
+  final String createdAt;
+  final String backupType;
+  BackupData({
+    required this.added,
+    required this.removed,
+    required this.addedBroken,
+    required this.removedBroken,
+    required this.history,
+    required this.createdAt,
+    required this.backupType,
+  });
+}
+
+String _p2(int n) => n.toString().padLeft(2, '0');
+
+/// «۱۴۰۵/۰۷/۰۶» با ارقام لاتین (برای فایل‌ها)
+String backupDateLatin(DateTime dt) {
+  final j = Jalali.fromDateTime(dt);
+  return '${j.year}/${_p2(j.month)}/${_p2(j.day)}';
+}
+
+String backupTimeLatin(DateTime dt, {bool seconds = false}) =>
+    '${_p2(dt.hour)}:${_p2(dt.minute)}${seconds ? ':${_p2(dt.second)}' : ''}';
+
+/// «۱۴۰۵/۰۷/۰۶ - ۰۲:۱۰» با ارقام فارسی (برای نمایش)
+String backupStampFa(DateTime dt) => toFarsiDigits('${backupDateLatin(dt)} - ${backupTimeLatin(dt)}');
+
+class BackupService {
+  static const String folderName = 'نماز و روزه قضا شمار';
+  static const String folderPath = '/storage/emulated/0/$folderName';
+
+  static String fileName(DateTime dt) {
+    final j = Jalali.fromDateTime(dt);
+    return 'GhazaBackup_${j.year}-${_p2(j.month)}-${_p2(j.day)}_${_p2(dt.hour)}${_p2(dt.minute)}.zip';
+  }
+
+  // ---------- دسترسی و پوشه ----------
+  static Future<bool> _hasPermission() async {
+    try {
+      return await Permission.manageExternalStorage.isGranted || await Permission.storage.isGranted;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> _requestPermission() async {
+    try {
+      if (await Permission.manageExternalStorage.request().isGranted) return true;
+    } catch (_) {}
+    try {
+      if (await Permission.storage.request().isGranted) return true;
+    } catch (_) {}
+    return _hasPermission();
+  }
+
+  /// ساخت پوشه‌ی «نماز و روزه قضا شمار» در حافظه‌ی گوشی
+  static Future<bool> ensureFolder({bool ask = false}) async {
+    if (!Platform.isAndroid) return false;
+    try {
+      var ok = await _hasPermission();
+      if (!ok && ask) ok = await _requestPermission();
+      if (!ok) return false;
+      final dir = Directory(folderPath);
+      if (!await dir.exists()) await dir.create(recursive: true);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// بعد از نصب (فقط یک بار اجازه می‌خواهد) پوشه را می‌سازد و در صورت نیاز بک‌آپ هفتگی می‌گیرد
+  static Future<void> onLaunch() async {
+    final prefs = await SharedPreferences.getInstance();
+    final asked = prefs.getBool('folder_asked') ?? false;
+    if (!asked) {
+      await prefs.setBool('folder_asked', true);
+      await ensureFolder(ask: true);
+    } else {
+      await ensureFolder(ask: false);
+    }
+    await autoBackupIfDue();
+  }
+
+  static Future<bool> autoBackupIfDue() async {
+    if (!appState.weeklyBackupOn) return false;
+    final last = appState.lastWeeklyTime;
+    final now = DateTime.now();
+    if (last != null && now.difference(last).inDays < 7 && !now.isBefore(last)) return false;
+    return createInFolder('weekly');
+  }
+
+  /// ساخت ZIP و ذخیره‌ی مستقیم در پوشه‌ی برنامه
+  static Future<bool> createInFolder(String type) async {
+    try {
+      if (!await ensureFolder(ask: false)) return false;
+      final now = DateTime.now();
+      final bytes = buildZip(type, now);
+      await File('$folderPath/${fileName(now)}').writeAsBytes(bytes, flush: true);
+      await appState.markBackupDone(weekly: type == 'weekly');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ---------- ساخت ZIP ----------
+  static Uint8List buildZip(String type, DateTime now) {
+    final prayers = <String, dynamic>{};
+    final progress = <String, dynamic>{};
+
+    Map<String, dynamic> progressOf(String id) {
+      final added = appState.totalAdded[id] ?? 0;
+      final removed = appState.totalRemoved[id] ?? 0;
+      final m = <String, dynamic>{
+        'initial': added,
+        'completed': removed,
+        'remaining': appState.currentOf(id),
+        'percentage': (appState.percentOf(id) * 100).round(),
+      };
+      if (kQasrIds.contains(id)) {
+        m['qasr_added'] = appState.totalAddedBroken[id] ?? 0;
+        m['qasr_removed'] = appState.totalRemovedBroken[id] ?? 0;
+      }
+      return m;
+    }
+
+    kBackupPrayerKeys.forEach((id, key) {
+      final total = appState.currentOf(id);
+      final qasr = kQasrIds.contains(id) ? appState.currentBrokenOf(id).clamp(0, total < 0 ? 0 : total).toInt() : 0;
+      prayers[key] = {'sahih': total - qasr, 'qasr': qasr};
+      progress[key] = progressOf(id);
+    });
+    progress['fasting'] = progressOf('rozeh');
+
+    final fasting = {'qaza_fasting': appState.currentOf('rozeh')};
+
+    final historyList = appState.history.map((e) {
+      final isFast = e.categoryId == 'rozeh';
+      final m = <String, dynamic>{
+        'date': backupDateLatin(e.time),
+        'time': backupTimeLatin(e.time, seconds: true),
+        'type': isFast ? 'fasting' : 'prayer',
+      };
+      if (!isFast) {
+        m['prayer'] = kBackupPrayerKeys[e.categoryId] ?? e.categoryId;
+        m['status'] = e.isBroken ? 'qasr' : 'sahih';
+      }
+      m['action'] = e.isAdd ? 'increase' : 'decrease';
+      m['amount'] = e.amount;
+      m['ts'] = e.time.toIso8601String();
+      return m;
+    }).toList();
+
+    final info = {
+      'backup_version': 1,
+      'app_name': 'نماز و روزه قضا شمار',
+      'app_version': kAppVersion,
+      'created_at': '${backupDateLatin(now)} ${backupTimeLatin(now, seconds: true)}',
+      'backup_type': type,
+    };
+
+    final archive = Archive();
+    void add(String name, String content) {
+      final data = utf8.encode(content);
+      archive.addFile(ArchiveFile(name, data.length, data));
+    }
+
+    add('prayers.json', jsonEncode(prayers));
+    add('fasting.json', jsonEncode(fasting));
+    add('history.json', jsonEncode({'history': historyList}));
+    add('progress.json', jsonEncode(progress));
+    add('backup_info.json', jsonEncode(info));
+    add('گزارش_اطلاعات.txt', _buildReport(now));
+
+    final out = ZipEncoder().encode(archive);
+    return Uint8List.fromList(out!);
+  }
+
+  static String _buildReport(DateTime now) {
+    const line = '━━━━━━━━━━━━━━━━━━';
+    final b = StringBuffer();
+    b.writeln('گزارش اطلاعات برنامه نماز و روزه قضا شمار');
+    b.writeln();
+    b.writeln('تاریخ تهیه بکاپ:');
+    b.writeln(backupStampFa(now));
+    b.writeln();
+    b.writeln(line);
+    b.writeln('نمازهای قضا');
+    b.writeln(line);
+    for (final id in kBackupPrayerKeys.keys) {
+      final total = appState.currentOf(id);
+      final qasr = kQasrIds.contains(id) ? appState.currentBrokenOf(id).clamp(0, total < 0 ? 0 : total).toInt() : 0;
+      b.writeln();
+      b.writeln(kBackupPrayerFa[id]);
+      b.writeln('سالم: ${toFarsiDigits(total - qasr)}');
+      b.writeln('شکسته: ${toFarsiDigits(qasr)}');
+      b.writeln('مجموع: ${toFarsiDigits(total)}');
+    }
+    b.writeln();
+    b.writeln(line);
+    b.writeln('روزه‌های قضا');
+    b.writeln(line);
+    b.writeln();
+    b.writeln('تعداد روزه‌های قضا:');
+    b.writeln('${toFarsiDigits(appState.currentOf('rozeh'))} روز');
+    b.writeln();
+    b.writeln(line);
+    b.writeln('نوارهای پیشرفت');
+    b.writeln(line);
+    b.writeln();
+    for (final id in kBackupPrayerKeys.keys) {
+      b.writeln('${kBackupPrayerFa[id]}: ${toFarsiDigits((appState.percentOf(id) * 100).round())}٪');
+    }
+    b.writeln('روزه قضا: ${toFarsiDigits((appState.percentOf('rozeh') * 100).round())}٪');
+    b.writeln();
+    b.writeln(line);
+    b.writeln('تاریخچه ثبت‌ها');
+    b.writeln(line);
+    if (appState.history.isEmpty) {
+      b.writeln();
+      b.writeln('رکوردی ثبت نشده است.');
+    }
+    for (final e in appState.history) {
+      final isFast = e.categoryId == 'rozeh';
+      b.writeln();
+      b.writeln(backupStampFa(e.time));
+      b.writeln(isFast ? 'روزه قضا' : (kBackupPrayerFa[e.categoryId] ?? e.categoryId));
+      if (!isFast) b.writeln(e.isBroken ? 'شکسته' : 'سالم');
+      b.writeln('${e.isAdd ? 'افزایش' : 'کاهش'} ${toFarsiDigits(e.amount)} عدد');
+    }
+    b.writeln();
+    b.writeln(line);
+    b.writeln();
+    b.writeln('پایان گزارش.');
+    return b.toString();
+  }
+
+  // ---------- خواندن ZIP ----------
+  static BackupData parseZip(Uint8List bytes) {
+    Archive archive;
+    try {
+      archive = ZipDecoder().decodeBytes(bytes);
+    } catch (_) {
+      throw const FormatException('این فایل یک ZIP معتبر نیست.');
+    }
+
+    Map<String, dynamic> readJson(String name) {
+      final f = archive.findFile(name);
+      if (f == null) throw FormatException('فایل «$name» داخل پشتیبان پیدا نشد.');
+      try {
+        return jsonDecode(utf8.decode(f.content as List<int>)) as Map<String, dynamic>;
+      } catch (_) {
+        throw FormatException('فایل «$name» خراب است.');
+      }
+    }
+
+    int asInt(dynamic v) => v is num ? v.toInt() : 0;
+
+    final info = readJson('backup_info.json');
+    final ver = info['backup_version'];
+    if (ver is! int) throw const FormatException('اطلاعات نسخه‌ی پشتیبان معتبر نیست.');
+    if (ver > 1) throw const FormatException('این پشتیبان با نسخه‌ی جدیدتری از برنامه ساخته شده است.');
+
+    final prayers = readJson('prayers.json');
+    final fasting = readJson('fasting.json');
+    final progress = readJson('progress.json');
+    final histJson = readJson('history.json');
+
+    final added = <String, int>{};
+    final removed = <String, int>{};
+    final addedBroken = <String, int>{};
+    final removedBroken = <String, int>{};
+
+    void rebuild(String id, int current, int qasr, Map<String, dynamic>? prog) {
+      if (current < 0) current = 0;
+      if (qasr < 0) qasr = 0;
+      if (qasr > current) qasr = current;
+      var a = prog == null ? current : asInt(prog['initial']);
+      if (a < current) a = current;
+      added[id] = a;
+      removed[id] = a - current;
+      var ab = prog == null ? qasr : asInt(prog['qasr_added']);
+      if (ab < qasr) ab = qasr;
+      addedBroken[id] = ab;
+      removedBroken[id] = ab - qasr;
+    }
+
+    for (final e in kBackupPrayerKeys.entries) {
+      final p = prayers[e.value];
+      if (p is! Map) throw FormatException('اطلاعات «${kBackupPrayerFa[e.key]}» در پشتیبان نیست.');
+      final sahih = asInt(p['sahih']);
+      final qasr = kQasrIds.contains(e.key) ? asInt(p['qasr']) : 0;
+      final prog = progress[e.value];
+      rebuild(e.key, sahih + qasr, qasr, prog is Map<String, dynamic> ? prog : null);
+    }
+    final fProg = progress['fasting'];
+    rebuild('rozeh', asInt(fasting['qaza_fasting']), 0, fProg is Map<String, dynamic> ? fProg : null);
+
+    final reverse = {for (final e in kBackupPrayerKeys.entries) e.value: e.key};
+    final history = <HistoryEntry>[];
+    final list = histJson['history'];
+    if (list is List) {
+      for (final raw in list) {
+        if (raw is! Map) continue;
+        final isFast = raw['type'] == 'fasting';
+        final catId = isFast ? 'rozeh' : reverse[raw['prayer']];
+        if (catId == null) continue;
+        DateTime? t;
+        try {
+          t = DateTime.parse(raw['ts'] as String);
+        } catch (_) {}
+        history.add(HistoryEntry(
+          categoryId: catId,
+          isAdd: raw['action'] == 'increase',
+          amount: asInt(raw['amount']),
+          time: t ?? DateTime.now(),
+          isBroken: !isFast && raw['status'] == 'qasr',
+        ));
+      }
+    }
+
+    return BackupData(
+      added: added,
+      removed: removed,
+      addedBroken: addedBroken,
+      removedBroken: removedBroken,
+      history: history,
+      createdAt: (info['created_at'] ?? '').toString(),
+      backupType: (info['backup_type'] ?? '').toString(),
+    );
+  }
+}
+
+/// -------------------- اجزای مشترک صفحات جدید --------------------
+class SubPageHeader extends StatelessWidget {
+  final String title;
+  const SubPageHeader({super.key, required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(colors: [Color(0xFF3E64FF), Color(0xFF5EA1FF)]),
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              appState.vibrate();
+              Navigator.pop(context);
+            },
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.arrow_forward, color: Colors.white),
+            ),
+          ),
+          const Spacer(),
+          Text(title, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+          const Spacer(),
+          const SizedBox(width: 30),
+        ],
+      ),
+    );
+  }
+}
+
+class SettingsTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+  const SettingsTile({super.key, required this.icon, required this.title, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        appState.vibrate();
+        onTap();
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 3))],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(color: const Color(0xFF3E64FF).withOpacity(0.10), shape: BoxShape.circle),
+              child: Icon(icon, color: const Color(0xFF3E64FF), size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold))),
+            const Icon(Icons.chevron_left, color: Color(0xFFAFB2C0)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class DashedDivider extends StatelessWidget {
+  const DashedDivider({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: LayoutBuilder(builder: (context, c) {
+        final count = (c.maxWidth / 9).floor();
+        return Row(
+          children: List.generate(
+            count,
+            (_) => Expanded(
+              child: Center(child: Container(width: 5, height: 1.2, color: const Color(0xFFCFD2DC))),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+/// -------------------- صفحه تنظیمات --------------------
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> with AppStateListenerMixin {
+  Future<void> _toggleNotifications(bool value) async {
+    appState.vibrate();
+    if (value) {
+      final granted = await PrayerNotify.requestPermissions();
+      await appState.setNotifications(true);
+      await PrayerNotify.rescheduleAll();
+      if (!granted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('اجازه‌ی نمایش اعلان قبلاً رد شده. شما را به تنظیمات اپ بردیم؛ از آنجا «اعلان‌ها» را روشن کنید و برگردید.'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    } else {
+      await appState.setNotifications(false);
+      await PrayerNotify.cancelAll();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final on = appState.notificationsOn;
+    return Scaffold(
+      backgroundColor: const Color(0xFFF3F5FA),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const SubPageHeader(title: 'تنظیمات'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 3))],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(color: const Color(0xFF3E64FF).withOpacity(0.10), shape: BoxShape.circle),
+                          child: const Icon(Icons.notifications_active_outlined, color: Color(0xFF3E64FF), size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text('اعلان‌ها', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold)),
+                        ),
+                        Switch(
+                          value: on,
+                          activeColor: const Color(0xFF3E64FF),
+                          onChanged: _toggleNotifications,
+                        ),
+                      ],
+                    ),
+                  ),
+                  SettingsTile(
+                    icon: Icons.backup_outlined,
+                    title: 'پشتیبان‌گیری (بک‌آپ)',
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupScreen())),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// -------------------- صفحه پشتیبان‌گیری --------------------
+class BackupScreen extends StatelessWidget {
+  const BackupScreen({super.key});
+
+  void _snack(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 4)));
+  }
+
+  Future<void> _manualBackup(BuildContext context) async {
+    await BackupService.ensureFolder(ask: true);
+    final now = DateTime.now();
+    try {
+      final bytes = BackupService.buildZip('manual', now);
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'ذخیره‌ی فایل پشتیبان',
+        fileName: BackupService.fileName(now),
+        bytes: bytes,
+        type: FileType.custom,
+        allowedExtensions: const ['zip'],
+      );
+      if (path != null) {
+        await appState.markBackupDone(weekly: false);
+        if (context.mounted) _snack(context, 'فایل پشتیبان ذخیره شد.');
+      }
+    } catch (_) {
+      if (context.mounted) _snack(context, 'ذخیره‌ی فایل پشتیبان انجام نشد.');
+    }
+  }
+
+  Future<bool> _confirm(
+    BuildContext context, {
+    required String title,
+    required Widget content,
+    required String cancel,
+    required String ok,
+    Color okColor = const Color(0xFF3E64FF),
+  }) async {
+    final r = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(child: content),
+        actionsAlignment: MainAxisAlignment.spaceBetween,
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(cancel)),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: okColor),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(ok),
+          ),
+        ],
+      ),
+    );
+    return r ?? false;
+  }
+
+  Future<void> _restore(BuildContext context) async {
+    await BackupService.ensureFolder(ask: true);
+    FilePickerResult? res;
+    try {
+      res = await FilePicker.platform.pickFiles(
+        dialogTitle: 'انتخاب فایل پشتیبان',
+        type: FileType.custom,
+        allowedExtensions: const ['zip'],
+        withData: true,
+      );
+    } catch (_) {
+      if (context.mounted) _snack(context, 'باز کردن فایل‌ها انجام نشد.');
+      return;
+    }
+    if (res == null || res.files.isEmpty) return;
+    final file = res.files.single;
+
+    BackupData data;
+    try {
+      Uint8List? bytes = file.bytes;
+      if (bytes == null && file.path != null) bytes = await File(file.path!).readAsBytes();
+      if (bytes == null) throw const FormatException('فایل خوانده نشد.');
+      data = BackupService.parseZip(bytes);
+    } on FormatException catch (e) {
+      if (context.mounted) {
+        await _confirm(context,
+            title: 'فایل نامعتبر',
+            content: Text(e.message, textAlign: TextAlign.center),
+            cancel: 'بستن',
+            ok: 'باشه');
+      }
+      return;
+    } catch (_) {
+      if (context.mounted) _snack(context, 'فایل پشتیبان خوانده نشد.');
+      return;
+    }
+    if (!context.mounted) return;
+
+    // مرحله ۱: نمایش نام فایل و تأیید
+    final okFile = await _confirm(
+      context,
+      title: 'فایل انتخاب‌شده',
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: Text(file.name, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+          if (data.createdAt.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text('تاریخ ساخت: ${toFarsiDigits(data.createdAt)}', style: const TextStyle(fontSize: 12, color: Color(0xFF8A8FA3))),
+          ],
+        ],
+      ),
+      cancel: 'انصراف',
+      ok: 'تأیید',
+    );
+    if (!okFile || !context.mounted) return;
+
+    // مرحله ۲: هشدار
+    final okWarn = await _confirm(
+      context,
+      title: '⚠️ هشدار',
+      content: const Text(
+        'با استفاده از فایل پشتیبان، اطلاعات فعلی\nبرنامه با اطلاعات موجود در فایل پشتیبان\nجایگزین می‌شوند.\n\n'
+        'اطلاعات فعلی برنامه پس از بازیابی از بین\nخواهد رفت و قابل بازگردانی نخواهد بود.\n\n'
+        'آیا از ادامه کار مطمئن هستید؟',
+        textAlign: TextAlign.center,
+        style: TextStyle(height: 1.8, fontSize: 13),
+      ),
+      cancel: 'انصراف',
+      ok: 'تأیید و بازیابی',
+      okColor: Colors.redAccent,
+    );
+    if (!okWarn || !context.mounted) return;
+
+    // مرحله ۳: تأیید نهایی (برای جلوگیری از لمس اتفاقی)
+    final okFinal = await _confirm(
+      context,
+      title: 'تأیید نهایی',
+      content: const Text(
+        'این آخرین فرصت برای لغو است.\nبا ادامه دادن، همه‌ی اطلاعات فعلی برنامه حذف می‌شود.',
+        textAlign: TextAlign.center,
+        style: TextStyle(height: 1.8, fontSize: 13),
+      ),
+      cancel: 'لغو',
+      ok: 'بله، بازیابی کن',
+      okColor: Colors.redAccent,
+    );
+    if (!okFinal || !context.mounted) return;
+
+    try {
+      await appState.restoreFromBackup(data);
+    } catch (_) {
+      if (context.mounted) _snack(context, 'بازیابی اطلاعات انجام نشد.');
+      return;
+    }
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        content: const Text(
+          '✅ بازیابی با موفقیت انجام شد\n\nاطلاعات فایل پشتیبان با موفقیت\nدر برنامه بازیابی شدند.',
+          textAlign: TextAlign.center,
+          style: TextStyle(height: 1.8, fontWeight: FontWeight.bold),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('باشه'))],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF3F5FA),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const SubPageHeader(title: 'پشتیبان‌گیری'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  SettingsTile(
+                    icon: Icons.event_repeat_outlined,
+                    title: 'پشتیبان‌گیری هفتگی',
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeeklyBackupScreen())),
+                  ),
+                  SettingsTile(
+                    icon: Icons.save_alt_outlined,
+                    title: 'پشتیبان‌گیری دستی',
+                    onTap: () => _manualBackup(context),
+                  ),
+                  SettingsTile(
+                    icon: Icons.menu_book_outlined,
+                    title: 'آموزش پشتیبان‌گیری و بازیابی اطلاعات',
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupGuideScreen())),
+                  ),
+                  SettingsTile(
+                    icon: Icons.settings_backup_restore_outlined,
+                    title: 'استفاده از فایل پشتیبان',
+                    onTap: () => _restore(context),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// -------------------- صفحه پشتیبان‌گیری هفتگی --------------------
+class WeeklyBackupScreen extends StatefulWidget {
+  const WeeklyBackupScreen({super.key});
+  @override
+  State<WeeklyBackupScreen> createState() => _WeeklyBackupScreenState();
+}
+
+class _WeeklyBackupScreenState extends State<WeeklyBackupScreen> with AppStateListenerMixin {
+  Future<void> _toggle(bool v) async {
+    appState.vibrate();
+    if (!v) {
+      await appState.setWeeklyBackup(false);
+      return;
+    }
+    final ok = await BackupService.ensureFolder(ask: true);
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('برای ذخیره‌ی پشتیبان در پوشه‌ی «نماز و روزه قضا شمار» باید اجازه‌ی دسترسی به فایل‌ها را بدهید.')),
+        );
+      }
+      return;
+    }
+    await appState.setWeeklyBackup(true);
+    // اولین پشتیبان بلافاصله بعد از فعال‌سازی گرفته می‌شود
+    await BackupService.createInFolder('weekly');
+  }
+
+  Widget _card(List<Widget> children) => Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 3))],
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final last = appState.lastBackupTime;
+    return Scaffold(
+      backgroundColor: const Color(0xFFF3F5FA),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const SubPageHeader(title: 'پشتیبان‌گیری هفتگی'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _card([
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text('پشتیبان‌گیری خودکار هفتگی', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                        ),
+                        Text(
+                          appState.weeklyBackupOn ? 'فعال' : 'غیرفعال',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: appState.weeklyBackupOn ? const Color(0xFF2ECC71) : const Color(0xFF8A8FA3),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Switch(
+                          value: appState.weeklyBackupOn,
+                          activeColor: const Color(0xFF3E64FF),
+                          onChanged: _toggle,
+                        ),
+                      ],
+                    ),
+                  ]),
+                  _card([
+                    const Text('آخرین پشتیبان‌گیری:', style: TextStyle(fontSize: 12, color: Color(0xFF8A8FA3))),
+                    const SizedBox(height: 4),
+                    Text(
+                      last == null ? 'هنوز پشتیبانی گرفته نشده است' : backupStampFa(last),
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                    const DashedDivider(),
+                    const Text('محل ذخیره:', style: TextStyle(fontSize: 12, color: Color(0xFF8A8FA3))),
+                    const SizedBox(height: 4),
+                    const Text('پوشه «نماز و روزه قضا شمار»', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  ]),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6),
+                    child: Text(
+                      'وقتی فعال باشد، برنامه هر هفته یک فایل ZIP جدید ایجاد می‌کند.',
+                      style: TextStyle(fontSize: 12, height: 1.8, color: Color(0xFF8A8FA3)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// -------------------- صفحه آموزش --------------------
+class BackupGuideScreen extends StatelessWidget {
+  const BackupGuideScreen({super.key});
+
+  Widget _stepText(String t) => Text(t, style: const TextStyle(fontSize: 13.5, height: 1.9, fontWeight: FontWeight.w600));
+
+  Widget _image(String asset) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.asset(
+          asset,
+          fit: BoxFit.contain,
+          width: double.infinity,
+          errorBuilder: (_, __, ___) => Container(
+            height: 120,
+            color: const Color(0xFFEDEFF5),
+            alignment: Alignment.center,
+            child: const Text('تصویر', style: TextStyle(color: Color(0xFF8A8FA3))),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF3F5FA),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const SubPageHeader(title: 'آموزش'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(colors: [Color(0xFF3E64FF), Color(0xFF5EA1FF)]),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [BoxShadow(color: const Color(0xFF3E64FF).withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
+                    ),
+                    child: const Text(
+                      'آموزش بازیابی اطلاعات با فایل پشتیبان',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 3))],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('مرحله ۱:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF3E64FF))),
+                        _stepText('وارد برنامه شوید و روی آیکون «تنظیمات» ضربه بزنید.'),
+                        _image('assets/amozesh1.png'),
+                        const DashedDivider(),
+                        const Text('مرحله ۲:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF3E64FF))),
+                        _stepText('روی گزینه «پشتیبان گیری» ضربه بزنید .'),
+                        const DashedDivider(),
+                        const Text('مرحله ۳:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF3E64FF))),
+                        _stepText(
+                          'روی گزینه «استفاده از فایل پشتیبان» ضربه بزنید ، و فایل پشتیبان مورد نظر خود را انتخاب کنید. '
+                          '(برای بازیابی جدیدترین اطلاعات، آخرین فایل پشتیبان را انتخاب کنید).',
+                        ),
+                        _image('assets/amozesh2.png'),
+                        const DashedDivider(),
+                        const Text(
+                          '⚠️ هشدار',
+                          style: TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'با استفاده از فایل پشتیبان، اطلاعات فعلی برنامه با اطلاعات موجود در فایل پشتیبان جایگزین می‌شوند.\n\n'
+                          'اطلاعات فعلی برنامه پس از بازیابی از بین خواهد رفت و قابل بازگردانی نخواهد بود.',
+                          style: TextStyle(color: Colors.red, fontSize: 15, fontWeight: FontWeight.bold, height: 1.9),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
