@@ -1186,16 +1186,11 @@ class BackupService {
     }
   }
 
-  /// بعد از نصب (فقط یک بار اجازه می‌خواهد) پوشه را می‌سازد و در صورت نیاز بک‌آپ هفتگی می‌گیرد
+  /// موقع باز شدن برنامه: هیچ درخواست دسترسی‌ای نشان داده نمی‌شود (فقط اگر قبلاً
+  /// اجازه گرفته شده بود، پوشه را می‌سازد). درخواست دسترسی فقط زمانی نشان داده
+  /// می‌شود که کاربر خودش «پشتیبان‌گیری هفتگی» را روشن کند یا «پشتیبان‌گیری دستی» بزند.
   static Future<void> onLaunch() async {
-    final prefs = await SharedPreferences.getInstance();
-    final asked = prefs.getBool('folder_asked') ?? false;
-    if (!asked) {
-      await prefs.setBool('folder_asked', true);
-      await ensureFolder(ask: true);
-    } else {
-      await ensureFolder(ask: false);
-    }
+    await ensureFolder(ask: false);
     await autoBackupIfDue();
   }
 
@@ -1644,6 +1639,7 @@ class BackupScreen extends StatelessWidget {
       final path = await FilePicker.platform.saveFile(
         dialogTitle: 'ذخیره‌ی فایل پشتیبان',
         fileName: BackupService.fileName(now),
+        initialDirectory: BackupService.folderPath,
         bytes: bytes,
         type: FileType.custom,
         allowedExtensions: const ['zip'],
@@ -1687,13 +1683,16 @@ class BackupScreen extends StatelessWidget {
   }
 
   Future<void> _restore(BuildContext context) async {
-    await BackupService.ensureFolder(ask: true);
+    // برای باز کردن/انتخاب فایل نیازی به اجازه‌ی «دسترسی به همه‌ی فایل‌ها» نیست؛
+    // فقط اگر قبلاً اجازه گرفته شده، پوشه را برای مسیر پیش‌فرض آماده می‌کنیم.
+    await BackupService.ensureFolder(ask: false);
     FilePickerResult? res;
     try {
       res = await FilePicker.platform.pickFiles(
         dialogTitle: 'انتخاب فایل پشتیبان',
         type: FileType.custom,
         allowedExtensions: const ['zip'],
+        initialDirectory: BackupService.folderPath,
         withData: true,
       );
     } catch (_) {
@@ -1957,15 +1956,20 @@ class BackupGuideScreen extends StatelessWidget {
       padding: const EdgeInsets.only(top: 12),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: Image.asset(
-          asset,
-          fit: BoxFit.contain,
-          width: double.infinity,
-          errorBuilder: (_, __, ___) => Container(
-            height: 120,
+        child: AspectRatio(
+          // عکس‌ها اسکرین‌شات گوشی‌اند: قاب عمودی ۹:۱۶
+          aspectRatio: 9 / 16,
+          child: Container(
             color: const Color(0xFFEDEFF5),
-            alignment: Alignment.center,
-            child: const Text('تصویر', style: TextStyle(color: Color(0xFF8A8FA3))),
+            child: Image.asset(
+              asset,
+              fit: BoxFit.contain,
+              width: double.infinity,
+              height: double.infinity,
+              errorBuilder: (_, __, ___) => const Center(
+                child: Text('تصویر', style: TextStyle(color: Color(0xFF8A8FA3))),
+              ),
+            ),
           ),
         ),
       ),
