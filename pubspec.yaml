@@ -1,7 +1,7 @@
 name: qaza_shomar
 description: "قضاشمار - مدیریت نماز و روزه قضا"
 publish_to: 'none'
-version: 2.0.0
+version: 2.0.0+3
 
 environment:
   sdk: ^3.6.0
